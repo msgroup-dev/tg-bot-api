@@ -2,6 +2,8 @@
 
 namespace TelegramBot\Api;
 
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use TelegramBot\Api\Types\ArrayOfBotCommand;
 use TelegramBot\Api\Types\ArrayOfChatMemberEntity;
 use TelegramBot\Api\Types\ArrayOfMessageEntity;
@@ -184,16 +186,23 @@ class BotApi
     protected $returnArray = true;
 
     /**
+     * @var LoggerInterface
+     */
+    private $logger;
+
+    /**
      * Constructor
      *
      * @param string $token Telegram Bot API token
      * @param string|null $trackerToken Yandex AppMetrica application api_key
+     * @param LoggerInterface|null $logger
      * @throws \Exception
      */
-    public function __construct($token, $trackerToken = null)
+    public function __construct($token, $trackerToken = null, $logger = null)
     {
         $this->curl = curl_init();
         $this->token = $token;
+        $this->logger = $logger ?: new NullLogger();
 
         if ($trackerToken) {
             @trigger_error(sprintf('Passing $trackerToken to %s is deprecated', self::class), \E_USER_DEPRECATED);
@@ -246,12 +255,24 @@ class BotApi
             $options = $this->customCurlOptions + $options;
         }
 
+        $this->logger->info('telegram BotApi call', [
+            'type' => 'call',
+            'method' => $method,
+            'data' => $data,
+        ]);
+
         $response = self::jsonValidate($this->executeCurl($options), $this->returnArray);
 
         if (\is_array($response)) {
             if (!isset($response['ok']) || !$response['ok']) {
                 throw new Exception($response['description'], $response['error_code']);
             }
+
+            $this->logger->info('telegram BotApi result', [
+                'type' => 'result',
+                'method' => $method,
+                'result' => $response,
+            ]);
 
             return $response['result'];
         }
@@ -260,7 +281,15 @@ class BotApi
             throw new Exception($response->description, $response->error_code);
         }
 
-        return $response->result;
+        $result = $response->result;
+
+        $this->logger->info('telegram BotApi result', [
+            'type' => 'result',
+            'method' => $method,
+            'result' => $result,
+        ]);
+
+        return $result;
     }
 
     /**
