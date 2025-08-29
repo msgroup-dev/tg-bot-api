@@ -1121,7 +1121,10 @@ class BotApi
         $messageThreadId = null,
         $protectContent = null,
         $allowSendingWithoutReply = null,
-        $thumbnail = null
+        $thumbnail = null,
+        $replyParameters = null,
+        $width = null,
+        $height = null
     ) {
         return Message::fromResponse($this->call('sendVideo', [
             'chat_id' => $chatId,
@@ -1137,6 +1140,9 @@ class BotApi
             'protect_content' => (bool) $protectContent,
             'allow_sending_without_reply' => (bool) $allowSendingWithoutReply,
             'thumbnail' => $thumbnail,
+            'reply_parameters' => is_null($replyParameters) ? $replyParameters : $replyParameters->toJson(),
+            'width' => $width,
+            'height' => $height,
         ]));
     }
 
