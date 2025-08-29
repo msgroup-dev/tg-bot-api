@@ -1198,7 +1198,9 @@ class BotApi
         $protectContent = null,
         $allowSendingWithoutReply = null,
         $thumbnail = null,
-        $replyParameters = null
+        $replyParameters = null,
+        $width = null,
+        $height = null,
     ) {
         if (null !== $replyToMessageId || null !== $allowSendingWithoutReply) {
             @trigger_error(
@@ -1225,7 +1227,9 @@ class BotApi
             'parse_mode' => $parseMode,
             'protect_content' => (bool) $protectContent,
             'thumbnail' => $thumbnail,
-            'reply_parameters' => is_null($replyParameters) ? $replyParameters : $replyParameters->toJson()
+            'reply_parameters' => is_null($replyParameters) ? $replyParameters : $replyParameters->toJson(),
+            'width' => $width,
+            'height' => $height,
         ]));
     }
 
