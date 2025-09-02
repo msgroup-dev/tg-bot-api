@@ -2,6 +2,8 @@
 
 namespace TelegramBot\Api;
 
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use TelegramBot\Api\Http\CurlHttpClient;
 use TelegramBot\Api\Types\UserChatBoosts;
 use TelegramBot\Api\Types\ReplyParameters;
@@ -172,16 +174,19 @@ class BotApi
      */
     private $fileEndpoint;
 
+    private readonly LoggerInterface $logger;
+
     /**
      * @param string $token Telegram Bot API token
      * @param HttpClientInterface|null $httpClient
      * @param string|null $endpoint
      */
-    public function __construct($token, ?HttpClientInterface $httpClient = null, $endpoint = null)
+    public function __construct($token, ?HttpClientInterface $httpClient = null, $endpoint = null, ?LoggerInterface $logger = null)
     {
         $this->token = $token;
         $this->endpoint = ($endpoint ?: self::URL_PREFIX) . $token;
         $this->fileEndpoint = $endpoint ? null : (self::FILE_URL_PREFIX . $token);
+        $this->logger = $logger ?? new NullLogger();
 
         $this->httpClient = $httpClient ?: new CurlHttpClient();
     }
@@ -252,7 +257,21 @@ class BotApi
 
         $endpoint = $this->endpoint . '/' . $method;
 
-        return $this->httpClient->request($endpoint, $data);
+        $this->logger->info('telegram BotApi call', [
+            'type' => 'call',
+            'method' => $method,
+            'data' => $data,
+        ]);
+
+        $result = $this->httpClient->request($endpoint, $data);
+
+        $this->logger->info('telegram BotApi result', [
+            'type' => 'result',
+            'method' => $method,
+            'result' => $result,
+        ]);
+
+        return $result;
     }
 
     /**
@@ -1179,7 +1198,9 @@ class BotApi
         $protectContent = null,
         $allowSendingWithoutReply = null,
         $thumbnail = null,
-        $replyParameters = null
+        $replyParameters = null,
+        $width = null,
+        $height = null,
     ) {
         if (null !== $replyToMessageId || null !== $allowSendingWithoutReply) {
             @trigger_error(
@@ -1206,7 +1227,9 @@ class BotApi
             'parse_mode' => $parseMode,
             'protect_content' => (bool) $protectContent,
             'thumbnail' => $thumbnail,
-            'reply_parameters' => is_null($replyParameters) ? $replyParameters : $replyParameters->toJson()
+            'reply_parameters' => is_null($replyParameters) ? $replyParameters : $replyParameters->toJson(),
+            'width' => $width,
+            'height' => $height,
         ]));
     }
 
