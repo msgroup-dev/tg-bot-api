@@ -134,16 +134,6 @@ class BotApi
     const MAX_TRACKED_EVENTS = 200;
 
     /**
-     * Url prefixes
-     */
-    const URL_PREFIX = 'https://api.telegram.org/bot';
-
-    /**
-     * Url prefix for files
-     */
-    const FILE_URL_PREFIX = 'https://api.telegram.org/file/bot';
-
-    /**
      * CURL object
      *
      * @var resource
@@ -191,23 +181,46 @@ class BotApi
     private $logger;
 
     /**
+     * @var string
+     */
+    private $serverUrl;
+
+    /**
      * Constructor
      *
      * @param string $token Telegram Bot API token
      * @param string|null $trackerToken Yandex AppMetrica application api_key
      * @param LoggerInterface|null $logger
+     * @param string|null $serverUrl
      * @throws \Exception
      */
-    public function __construct($token, $trackerToken = null, $logger = null)
+    public function __construct($token, $trackerToken = null, $logger = null, $serverUrl = null)
     {
         $this->curl = curl_init();
         $this->token = $token;
         $this->logger = $logger ?: new NullLogger();
+        $this->serverUrl = $serverUrl ?: 'https://api.telegram.org';
 
         if ($trackerToken) {
             @trigger_error(sprintf('Passing $trackerToken to %s is deprecated', self::class), \E_USER_DEPRECATED);
             $this->tracker = new Botan($trackerToken);
         }
+    }
+
+    /**
+     * @return string
+     */
+    private function getUrlPrefix()
+    {
+        return $this->serverUrl . '/bot';
+    }
+
+    /**
+     * @return string
+     */
+    private function getFileUrlPrefix()
+    {
+        return $this->serverUrl . '/file/bot';
     }
 
     /**
@@ -1860,7 +1873,7 @@ class BotApi
      */
     public function getUrl()
     {
-        return self::URL_PREFIX.$this->token;
+        return $this->getUrlPrefix() . $this->token;
     }
 
     /**
@@ -1868,7 +1881,7 @@ class BotApi
      */
     public function getFileUrl()
     {
-        return self::FILE_URL_PREFIX.$this->token;
+        return $this->getFileUrlPrefix() . $this->token;
     }
 
     /**
