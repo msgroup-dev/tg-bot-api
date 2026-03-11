@@ -181,9 +181,9 @@ class BotApi
     private $logger;
 
     /**
-     * @var string
+     * @var array
      */
-    private $serverUrl;
+    private $serverUrls;
 
     /**
      * Constructor
@@ -191,15 +191,20 @@ class BotApi
      * @param string $token Telegram Bot API token
      * @param string|null $trackerToken Yandex AppMetrica application api_key
      * @param LoggerInterface|null $logger
-     * @param string|null $serverUrl
+     * @param string|array $serverUrls
      * @throws \Exception
      */
-    public function __construct($token, $trackerToken = null, $logger = null, $serverUrl = null)
+    public function __construct($token, $trackerToken = null, $logger = null, $serverUrls = [])
     {
         $this->curl = curl_init();
         $this->token = $token;
         $this->logger = $logger ?: new NullLogger();
-        $this->serverUrl = $serverUrl ?: 'https://api.telegram.org';
+
+        if(is_string($serverUrls)) {
+            $serverUrls = [$serverUrls];
+        }
+        $serverUrls[] = 'https://api.telegram.org';
+        $this->serverUrls = $serverUrls;
 
         if ($trackerToken) {
             @trigger_error(sprintf('Passing $trackerToken to %s is deprecated', self::class), \E_USER_DEPRECATED);
@@ -210,17 +215,23 @@ class BotApi
     /**
      * @return string
      */
-    private function getUrlPrefix()
+    private function getUrlPrefix($serverUrlIndex = 0)
     {
-        return $this->serverUrl . '/bot';
+        if($serverUrlIndex > (count($this->serverUrls) + 1)) {
+            throw new NoAvailableUrlsException('No available server urls');
+        }
+        return $this->serverUrls[$serverUrlIndex] . '/bot';
     }
 
     /**
      * @return string
      */
-    private function getFileUrlPrefix()
+    private function getFileUrlPrefix($serverUrlIndex = 0)
     {
-        return $this->serverUrl . '/file/bot';
+        if($serverUrlIndex > (count($this->serverUrls) + 1)) {
+            throw new NoAvailableUrlsException('No available server urls');
+        }
+        return $this->serverUrls[$serverUrlIndex] . '/file/bot';
     }
 
     /**
@@ -251,50 +262,71 @@ class BotApi
      */
     public function call($method, array $data = null, $timeout = 10)
     {
-        $options = $this->proxySettings + [
-            CURLOPT_URL => $this->getUrl().'/'.$method,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => null,
-            CURLOPT_POSTFIELDS => null,
-            CURLOPT_TIMEOUT => $timeout,
-        ];
-
-        if ($data) {
-            $options[CURLOPT_POST] = true;
-            $options[CURLOPT_POSTFIELDS] = $data;
-        }
-
-        if (!empty($this->customCurlOptions)) {
-            $options = $this->customCurlOptions + $options;
-        }
-
         $this->logger->info('telegram BotApi call', [
             'type' => 'call',
             'method' => $method,
             'data' => $data,
         ]);
 
-        $response = self::jsonValidate($this->executeCurl($options), $this->returnArray);
+        $serverUrl = $this->getUrl($serverUrlIndex = 0);
 
-        if (\is_array($response)) {
-            if (!isset($response['ok']) || !$response['ok']) {
-                throw new Exception($response['description'], $response['error_code']);
+        do {
+            $retry = false;
+            try {
+                $options = $this->proxySettings + [
+                        CURLOPT_URL => $serverUrl .'/'.$method,
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_POST => null,
+                        CURLOPT_POSTFIELDS => null,
+                        CURLOPT_TIMEOUT => $timeout,
+                    ];
+
+                if ($data) {
+                    $options[CURLOPT_POST] = true;
+                    $options[CURLOPT_POSTFIELDS] = $data;
+                }
+
+                if (!empty($this->customCurlOptions)) {
+                    $options = $this->customCurlOptions + $options;
+                }
+
+                $headers = isset($options[CURLOPT_HTTPHEADER]) ? $options[CURLOPT_HTTPHEADER] : [];
+                $headers[] = 'Expect:';
+                $options[CURLOPT_HTTPHEADER] = $headers;
+
+                $response = self::jsonValidate($this->executeCurl($options), $this->returnArray);
+
+                if (\is_array($response)) {
+                    if (!isset($response['ok']) || !$response['ok']) {
+                        throw new Exception($response['description'], $response['error_code']);
+                    }
+
+                    $result = $response['result'];
+                } else {
+                    if (!$response->ok) {
+                        throw new Exception($response->description, $response->error_code);
+                    }
+
+                    $result = $response->result;
+                }
+            } catch (HttpException $e) {
+
+                if(!in_array($e->getCode(), [404, 500, 502, 503])) {
+                    throw $e;
+                }
+
+                $this->logger->warning('telegram BotApi http error', [
+                    'type' => 'http_error',
+                    'error' => $e->getMessage(),
+                    'serverUrlIndex' => $serverUrlIndex,
+                ]);
+
+                $serverUrl = $this->getUrl(++$serverUrlIndex);
+
+                $retry = true;
             }
 
-            $this->logger->info('telegram BotApi result', [
-                'type' => 'result',
-                'method' => $method,
-                'result' => $response,
-            ]);
-
-            return $response['result'];
-        }
-
-        if (!$response->ok) {
-            throw new Exception($response->description, $response->error_code);
-        }
-
-        $result = $response->result;
+        } while ($retry);
 
         $this->logger->info('telegram BotApi result', [
             'type' => 'result',
@@ -1490,10 +1522,30 @@ class BotApi
             CURLOPT_HEADER => 0,
             CURLOPT_HTTPGET => 1,
             CURLOPT_RETURNTRANSFER => 1,
-            CURLOPT_URL => $this->getFileUrl().'/'.$file->getFilePath(),
+            CURLOPT_URL => $this->getFileUrl($serverUrlIndex = 0).'/'.$file->getFilePath(),
         ];
 
-        return $this->executeCurl($options);
+        do {
+            $retry = false;
+            try {
+                return $this->executeCurl($options);
+            } catch (HttpException $e) {
+
+                if(!in_array($e->getCode(), [404, 500, 502, 503])) {
+                    throw $e;
+                }
+
+                $this->logger->warning('telegram BotApi http error', [
+                    'type' => 'http_error',
+                    'error' => $e->getMessage(),
+                    'serverUrlIndex' => $serverUrlIndex,
+                ]);
+
+                $options[CURLOPT_URL] = $this->getUrl(++$serverUrlIndex).'/'.$file->getFilePath();
+
+                $retry = true;
+            }
+        } while ($retry);
     }
 
     /**
@@ -1871,17 +1923,17 @@ class BotApi
     /**
      * @return string
      */
-    public function getUrl()
+    public function getUrl($serverUrlIndex = 0)
     {
-        return $this->getUrlPrefix() . $this->token;
+        return $this->getUrlPrefix($serverUrlIndex) . $this->token;
     }
 
     /**
      * @return string
      */
-    public function getFileUrl()
+    public function getFileUrl($serverUrlIndex = 0)
     {
-        return $this->getFileUrlPrefix() . $this->token;
+        return $this->getFileUrlPrefix($serverUrlIndex) . $this->token;
     }
 
     /**
